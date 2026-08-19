@@ -258,10 +258,13 @@ def reset_prediction():
 
 @app.route("/analysis/history/clear", methods=["POST"])
 def clear_prediction_history():
-    with get_db() as conn:
-        conn.execute("DELETE FROM predictions")
-        conn.commit()
-    flash("Prediction history was cleared from database.db.", "success")
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM predictions")
+    conn.commit()
+    cursor.close()
+    conn.close()
+    flash("Prediction history was cleared.", "success")
     return redirect(url_for("analysis_predictions"))
 
 
