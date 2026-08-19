@@ -3,6 +3,9 @@ import sqlite3
 import psycopg2
 import psycopg2.extras
 from flask import Flask, render_template, redirect, url_for, request, flash
+from flask_wtf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from model_service import ChurnModelService
 import os
 
@@ -10,9 +13,24 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "database.db"
 DATA_PATH = BASE_DIR / "customer_churn_data.csv"
 DATABASE_URL = os.environ.get("DATABASE_URL")
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "churnguard-local-secret-key")
+
+# SECRET_KEY must be set in the environment (e.g. Render's dashboard).
+# No hardcoded fallback: a guessable secret key lets an attacker forge
+# session cookies and flash-message signatures.
+try:
+    app.secret_key = os.environ["SECRET_KEY"]
+except KeyError as exc:
+    raise RuntimeError(
+        "SECRET_KEY environment variable is not set. "
+        "Set it in your deployment environment before starting the app."
+    ) from exc
+
+csrf = CSRFProtect(app)
+limiter = Limiter(get_remote_address, app=app, default_limits=["200 per hour"])
+
 model_service = ChurnModelService(DATA_PATH)
 
 
@@ -158,6 +176,7 @@ def analysis_overview():
 
 
 @app.route("/analysis/predictions", methods=["GET", "POST"])
+@limiter.limit("20 per minute", methods=["POST"])
 def analysis_predictions():
     result = None
     form_data = {}
@@ -205,8 +224,14 @@ def analysis_predictions():
             conn.close()
 
             return redirect(url_for("analysis_predictions", result_id=prediction_id))
-        except Exception as exc:
+        except ValueError as exc:
+            # Validation errors are safe and useful to show the user directly.
             flash(str(exc), "error")
+        except Exception:
+            # Anything unexpected (DB errors, model errors, etc.) is logged
+            # server-side only, so internals are never exposed to the client.
+            app.logger.exception("Unexpected error while generating a prediction")
+            flash("Something went wrong processing your request. Please try again.", "error")
 
     result_id = request.args.get("result_id", type=int)
     if result_id:
@@ -257,13 +282,21 @@ def reset_prediction():
 
 
 @app.route("/analysis/history/clear", methods=["POST"])
+@limiter.limit("5 per minute")
 def clear_prediction_history():
+    # Destructive action — require a shared admin token so an anonymous
+    # visitor can't wipe the prediction history for everyone.
+    if not ADMIN_TOKEN or request.form.get("admin_token") != ADMIN_TOKEN:
+        flash("Not authorized to clear prediction history.", "error")
+        return redirect(url_for("analysis_predictions"))
+
     conn, db_type = get_db()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM predictions")
     conn.commit()
     cursor.close()
     conn.close()
+
     flash("Prediction history was cleared.", "success")
     return redirect(url_for("analysis_predictions"))
 

@@ -4,8 +4,13 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
+import joblib
 
 RANDOM_STATE = 42
+MODEL_CACHE = "model_cache.joblib"
+
+# on train: joblib.dump({"model": self.model, "scaler": self.scaler, "feature_columns": self.feature_columns}, MODEL_CACHE)
+# on init: if MODEL_CACHE.exists(): load instead of retrain
 MODEL_PARAMS = {
     "metric": "manhattan",
     "n_neighbors": 11,
