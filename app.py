@@ -1,0 +1,195 @@
+from pathlib import Path
+import sqlite3
+from flask import Flask, render_template, redirect, url_for, request, flash
+from model_service import ChurnModelService
+import os
+
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "database.db"
+DATA_PATH = BASE_DIR / "customer_churn_data.csv"
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "fallback-dev-key")
+model_service = ChurnModelService(DATA_PATH)
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS predictions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                age INTEGER NOT NULL,
+                gender TEXT NOT NULL,
+                tenure INTEGER NOT NULL,
+                monthly_charges REAL NOT NULL,
+                total_charges REAL NOT NULL,
+                contract_type TEXT NOT NULL,
+                internet_service TEXT NOT NULL,
+                tech_support TEXT NOT NULL,
+                prediction TEXT NOT NULL,
+                churn_probability REAL NOT NULL,
+                risk_level TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+
+
+def validate_form(form):
+    values = {
+        "age": form.get("age", "").strip(),
+        "gender": form.get("gender", "").strip(),
+        "tenure": form.get("tenure", "").strip(),
+        "monthly_charges": form.get("monthly_charges", "").strip(),
+        "total_charges": form.get("total_charges", "").strip(),
+        "contract_type": form.get("contract_type", "").strip(),
+        "internet_service": form.get("internet_service", "").strip(),
+        "tech_support": form.get("tech_support", "").strip(),
+    }
+
+    required = [k for k, v in values.items() if v == ""]
+    if required:
+        raise ValueError("Please complete every field before generating a prediction.")
+
+    age = int(values["age"])
+    tenure = int(values["tenure"])
+    monthly = float(values["monthly_charges"])
+    total = float(values["total_charges"])
+
+    if not 18 <= age <= 120:
+        raise ValueError("Age must be between 18 and 120.")
+    if tenure < 0:
+        raise ValueError("Tenure cannot be negative.")
+    if monthly < 0 or total < 0:
+        raise ValueError("Charges cannot be negative.")
+    if values["gender"] not in {"Male", "Female"}:
+        raise ValueError("Gender must match the categories used by the trained model: Male or Female.")
+    if values["tech_support"] not in {"Yes", "No"}:
+        raise ValueError("Tech Support must be Yes or No.")
+
+    return values
+
+
+@app.context_processor
+def inject_model_status():
+    return {
+        "model_ready": model_service.ready,
+        "model_error": model_service.error,
+        "selected_model_name": "Tuned K-Nearest Neighbours",
+    }
+
+
+@app.route("/")
+def home():
+    return render_template("index.html")
+
+
+@app.route("/analysis")
+def analysis():
+    return redirect(url_for("analysis_overview"))
+
+
+@app.route("/analysis/overview")
+def analysis_overview():
+    with get_db() as conn:
+        total_predictions = conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
+        high_risk = conn.execute("SELECT COUNT(*) FROM predictions WHERE risk_level = 'HIGH'").fetchone()[0]
+    return render_template(
+        "analysis/overview.html",
+        total_predictions=total_predictions,
+        high_risk=high_risk,
+    )
+
+
+@app.route("/analysis/predictions", methods=["GET", "POST"])
+def analysis_predictions():
+    result = None
+    form_data = {}
+
+    if request.method == "POST":
+        try:
+            form_data = validate_form(request.form)
+            prediction = model_service.predict(form_data)
+
+            with get_db() as conn:
+                cursor = conn.execute("""
+                    INSERT INTO predictions (
+                        age, gender, tenure, monthly_charges, total_charges,
+                        contract_type, internet_service, tech_support,
+                        prediction, churn_probability, risk_level
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    int(form_data["age"]), form_data["gender"], int(form_data["tenure"]),
+                    float(form_data["monthly_charges"]), float(form_data["total_charges"]),
+                    form_data["contract_type"], form_data["internet_service"], form_data["tech_support"],
+                    prediction["prediction"], prediction["probability"], prediction["risk_level"],
+                ))
+                prediction_id = cursor.lastrowid
+                conn.commit()
+
+            return redirect(url_for("analysis_predictions", result_id=prediction_id))
+        except Exception as exc:
+            flash(str(exc), "error")
+
+    result_id = request.args.get("result_id", type=int)
+    if result_id:
+        with get_db() as conn:
+            row = conn.execute("SELECT * FROM predictions WHERE id = ?", (result_id,)).fetchone()
+        if row:
+            row = dict(row)
+            row["confidence_percent"] = round(row["churn_probability"] * 100, 1)
+            reasons = []
+            if row["contract_type"] == "Month-to-Month": reasons.append("month-to-month contract")
+            if row["monthly_charges"] >= 80: reasons.append("higher monthly charges")
+            if row["tenure"] <= 12: reasons.append("short customer tenure")
+            if row["tech_support"] == "No": reasons.append("no tech support")
+            row["root_cause"] = ", ".join(reasons[:3]) if reasons else "combined customer profile signals"
+            result = row
+            form_data = {
+                "age": row["age"], "gender": row["gender"], "tenure": row["tenure"],
+                "monthly_charges": row["monthly_charges"], "total_charges": row["total_charges"],
+                "contract_type": row["contract_type"], "internet_service": row["internet_service"],
+                "tech_support": row["tech_support"],
+            }
+
+    return render_template(
+        "analysis/predictions.html",
+        result=result,
+        form_data=form_data,
+        model_params={"metric": "manhattan", "n_neighbors": 11, "p": 1, "weights": "distance"},
+    )
+
+
+@app.route("/analysis/predictions/reset", methods=["POST"])
+def reset_prediction():
+    return redirect(url_for("analysis_predictions"))
+
+
+@app.route("/analysis/history/clear", methods=["POST"])
+def clear_prediction_history():
+    with get_db() as conn:
+        conn.execute("DELETE FROM predictions")
+        conn.commit()
+    flash("Prediction history was cleared from database.db.", "success")
+    return redirect(url_for("analysis_predictions"))
+
+
+@app.route("/model")
+def model():
+    return render_template("model.html")
+
+
+@app.route("/about")
+def about():
+    return render_template("about.html")
+
+
+if __name__ == "__main__":
+    init_db()
+    app.run(host="127.0.0.1", port=5000, debug=True)
