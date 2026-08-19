@@ -37,18 +37,44 @@ model_service = ChurnModelService(DATA_PATH)
 
 
 def get_db():
-    # add if case for the newly create of DATABASE_URL environment for postgresql
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
-    return conn, "postgres"
+    # Use Postgres in production (Render sets DATABASE_URL). Fall back to the
+    # local SQLite file when it isn't set, so `python app.py` still works
+    # without a Postgres instance on hand (matches README's local dev flow).
+    if DATABASE_URL:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+        return conn, "postgres"
+    conn = sqlite3.connect(BASE_DIR / "database.db")
+    conn.row_factory = sqlite3.Row
+    return conn, "sqlite"
 
 
 def init_db():
     conn, db_type = get_db()
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute("""
+    if db_type == "postgres":
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS predictions (
+                        id SERIAL PRIMARY KEY,
+                        age INTEGER NOT NULL,
+                        gender TEXT NOT NULL,
+                        tenure INTEGER NOT NULL,
+                        monthly_charges REAL NOT NULL,
+                        total_charges REAL NOT NULL,
+                        contract_type TEXT NOT NULL,
+                        internet_service TEXT NOT NULL,
+                        tech_support TEXT NOT NULL,
+                        prediction TEXT NOT NULL,
+                        churn_probability REAL NOT NULL,
+                        risk_level TEXT NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+    else:
+        with conn:
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS predictions (
-                    id SERIAL PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     age INTEGER NOT NULL,
                     gender TEXT NOT NULL,
                     tenure INTEGER NOT NULL,
@@ -64,6 +90,17 @@ def init_db():
                 )
             """)
     conn.close()
+
+
+# Run once at import time, not inside `if __name__ == "__main__"`: gunicorn
+# (see Procfile) imports this module directly and never executes that
+# block, so relying on it there meant the predictions table was never
+# created in production. A failure here is logged rather than raised so a
+# transient DB hiccup at boot doesn't crash the whole worker.
+try:
+    init_db()
+except Exception:
+    app.logger.exception("Failed to initialize the predictions table at startup")
 
 
 def validate_form(form):
@@ -275,5 +312,7 @@ def about():
 
 
 if __name__ == "__main__":
-    init_db()
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    # init_db() already ran at import time above. Debug mode is opt-in via
+    # env var so it can never be accidentally left on in a deployed build.
+    debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+    app.run(host="127.0.0.1", port=5000, debug=debug_mode)
