@@ -20,13 +20,13 @@ model_service = ChurnModelService(DATA_PATH)
 def get_db():
     # add if case for the newly create of DATABASE_URL environment for postgresql
     if DATABASE_URL:
-        url = DATABASE_URL.report("postgres://", "postgresql://", 1)
+        url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
         conn = psycopg2.connect(url)
         return conn, "postgres"
-    else: 
+    else:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
-        return conn
+        return conn, "sqlite"
 
 
 def init_db():
