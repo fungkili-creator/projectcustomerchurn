@@ -259,7 +259,7 @@
 <div class="max-w-7xl mx-auto">
 <header class="mb-10">
 <h1 class="text-display-lg font-display-lg text-on-surface">Customer Risk Predictor</h1>
-<p class="text-body-lg text-on-surface-variant mt-2">Enter one customer profile, run the tuned KNN locally, and store the result in SQLite.</p>
+<p class="text-body-lg text-on-surface-variant mt-2">Enter one customer profile, run it through the tuned KNN model on the deployed server, and store the result securely in the cloud PostgreSQL database.</p>
 </header>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -282,6 +282,7 @@
 <div class="grid grid-cols-1 lg:grid-cols-12 gap-gutter items-start">
 <section class="lg:col-span-7 space-y-6">
 <form id="prediction-form" method="POST" action="{{ url_for('analysis_predictions') }}" class="bg-surface-container-lowest rounded-xl p-8 neo-shadow relative bracket-corner">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/> 
 <div class="mb-8">
 <div class="flex items-center gap-2 text-primary font-bold mb-6"><span class="material-symbols-outlined">person</span><span class="text-label-sm uppercase tracking-wide">Demographics</span></div>
 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -312,8 +313,14 @@
 </form>
 
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-<form method="POST" action="{{ url_for('reset_prediction') }}"><button type="submit" class="w-full py-3 border-2 border-outline-variant text-on-surface-variant rounded-lg font-bold hover:bg-surface-container">Reset Current Input</button></form>
-<form method="POST" action="{{ url_for('clear_prediction_history') }}" onsubmit="return confirm('Delete all prediction records from database.db?');"><button type="submit" class="w-full py-3 border-2 border-error/30 text-error rounded-lg font-bold hover:bg-error-container">Clear Database History</button></form>
+<form method="POST" action="{{ url_for('reset_prediction') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/><button type="submit" class="w-full py-3 border-2 border-outline-variant text-on-surface-variant rounded-lg font-bold hover:bg-surface-container">Reset Current Input</button></form>
+<form method="POST" action="{{ url_for('clear_prediction_history') }}"
+      onsubmit="return confirm('Delete all prediction records?') && injectAdminToken(this);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+    <input type="hidden" name="admin_token" id="admin-token-field" value=""/>
+    <button type="submit" class="w-full py-3 border-2 border-error/30 text-error rounded-lg font-bold hover:bg-error-container">Clear Database History</button>
+</form>
+
 </div>
 </section>
 
@@ -322,18 +329,18 @@
 <span class="text-label-sm text-secondary uppercase tracking-widest">Model Running Process</span>
 <div class="mt-6 space-y-4" id="process-list">
 {% set completed = result is not none %}
-{% for step in ['1. Validate form input','2. Encode + standardize features','3. Run tuned KNN inference','4. Save result to SQLite database.db'] %}
+{% for step in ['1. Validate form input','2. Encode + standardize features','3. Run tuned KNN inference','4. Save result to the cloud'] %}
 <div class="flex items-center gap-3 p-3 rounded-lg {% if completed %}bg-primary-fixed{% else %}bg-surface-container{% endif %}"><span class="material-symbols-outlined {% if completed %}text-primary{% else %}text-secondary{% endif %}">{% if completed %}check_circle{% else %}radio_button_unchecked{% endif %}</span><span>{{ step }}</span></div>
 {% endfor %}
 </div>
-<div id="running-message" class="hidden mt-4 p-3 rounded-lg bg-primary-fixed text-on-primary-fixed font-bold">Running prediction locally…</div>
+<div id="running-message" class="hidden mt-4 p-3 rounded-lg bg-primary-fixed text-on-primary-fixed font-bold">Running prediction …</div>
 </div>
 
 <div class="bg-surface-container-lowest rounded-xl p-8 neo-shadow border border-outline-variant/10 relative overflow-hidden">
 {% if result %}
 <div class="flex justify-between items-start mb-6"><div><span class="text-label-sm text-secondary uppercase tracking-widest block mb-1">Assessment #{{ result.id }}</span><h3 class="text-headline-md font-bold {% if result.risk_level == 'HIGH' %}text-error{% else %}text-primary{% endif %}">Risk Level: {{ result.risk_level }}</h3></div><span class="material-symbols-outlined text-primary">analytics</span></div>
 <div class="mb-6"><div class="flex justify-between text-sm mb-2"><span>Predicted churn probability</span><strong>{{ result.confidence_percent }}%</strong></div><div class="w-full h-5 bg-surface-container rounded-full overflow-hidden"><div class="h-full bg-primary-container rounded-full" style="width: {{ result.confidence_percent }}%"></div></div><div class="flex justify-between text-xs text-secondary mt-2"><span>Stay</span><span>Churn</span></div></div>
-<div class="grid grid-cols-2 gap-4 mb-6"><div class="p-4 bg-surface-container-low rounded-xl"><p class="text-label-sm text-secondary">Prediction</p><p class="text-2xl font-bold">{{ result.prediction }}</p></div><div class="p-4 bg-surface-container-low rounded-xl"><p class="text-label-sm text-secondary">Stored</p><p class="font-bold">SQLite #{{ result.id }}</p></div></div>
+<div class="grid grid-cols-2 gap-4 mb-6"><div class="p-4 bg-surface-container-low rounded-xl"><p class="text-label-sm text-secondary">Prediction</p><p class="text-2xl font-bold">{{ result.prediction }}</p></div><div class="p-4 bg-surface-container-low rounded-xl"><p class="text-label-sm text-secondary">Stored</p><p class="font-bold">Postgres #{{ result.id }}</p></div></div>
 <div class="p-5 bg-surface-container-low rounded-xl border-l-4 border-primary"><strong class="text-primary">Main profile signals:</strong> {{ result.root_cause }}.</div>
 {% else %}
 <div class="py-12 text-center"><span class="material-symbols-outlined text-5xl text-outline">query_stats</span><h3 class="text-headline-md font-bold mt-4">No prediction yet</h3><p class="text-on-surface-variant mt-2">Complete the form to generate a real model result.</p></div>
@@ -442,6 +449,13 @@ if (predictionForm) {
             setTimeout(() => {
                 node.remove();
             }, 15000);
+        };
+
+        function injectAdminToken(form) {
+            const token = prompt("Enter admin token to confirm deletion:");
+            if (!token) return false;
+            document.getElementById("admin-token-field").value = token;
+            return true;
         };
 
         setInterval(createNode, 3000);

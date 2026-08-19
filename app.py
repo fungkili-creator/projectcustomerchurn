@@ -8,9 +8,11 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from model_service import ChurnModelService
 import os
+from dotenv import load_dotenv 
+
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "database.db"
 DATA_PATH = BASE_DIR / "customer_churn_data.csv"
 DATABASE_URL = os.environ.get("DATABASE_URL")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
@@ -36,59 +38,31 @@ model_service = ChurnModelService(DATA_PATH)
 
 def get_db():
     # add if case for the newly create of DATABASE_URL environment for postgresql
-    if DATABASE_URL:
-        url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-        conn = psycopg2.connect(url)
-        return conn, "postgres"
-    else:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        return conn, "sqlite"
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    return conn, "postgres"
 
 
 def init_db():
     conn, db_type = get_db()
-    # with get_db() as conn: replce this line
-##    with conn:
-    cursor = conn.cursor()
-    if db_type == "postgres":
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS predictions (
-                id SERIAL PRIMARY KEY,
-                age INTEGER NOT NULL,
-                gender VARCHAR(20) NOT NULL,
-                tenure INTEGER NOT NULL,
-                monthly_charges NUMERIC(10,2) NOT NULL,
-                total_charges NUMERIC(10,2) NOT NULL,
-                contract_type VARCHAR(50) NOT NULL,
-                internet_service VARCHAR(50) NOT NULL,
-                tech_support VARCHAR(20) NOT NULL,
-                prediction VARCHAR(10) NOT NULL,
-                churn_probability NUMERIC(5,4) NOT NULL,
-                risk_level VARCHAR(20) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-    else:
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS predictions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                age INTEGER NOT NULL,
-                gender TEXT NOT NULL,
-                tenure INTEGER NOT NULL,
-                monthly_charges REAL NOT NULL,
-                total_charges REAL NOT NULL,
-                contract_type TEXT NOT NULL,
-                internet_service TEXT NOT NULL,
-                tech_support TEXT NOT NULL,
-                prediction TEXT NOT NULL,
-                churn_probability REAL NOT NULL,
-                risk_level TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-    conn.commit()
-    cursor.close()
+    with conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS predictions (
+                    id SERIAL PRIMARY KEY,
+                    age INTEGER NOT NULL,
+                    gender TEXT NOT NULL,
+                    tenure INTEGER NOT NULL,
+                    monthly_charges REAL NOT NULL,
+                    total_charges REAL NOT NULL,
+                    contract_type TEXT NOT NULL,
+                    internet_service TEXT NOT NULL,
+                    tech_support TEXT NOT NULL,
+                    prediction TEXT NOT NULL,
+                    churn_probability REAL NOT NULL,
+                    risk_level TEXT NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
     conn.close()
 
 
@@ -149,25 +123,14 @@ def analysis():
 @app.route("/analysis/overview")
 ## change code by using postgres
 def analysis_overview():
-##    with get_db() as conn:
-##        total_predictions = conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
-##        high_risk = conn.execute("SELECT COUNT(*) FROM predictions WHERE risk_level = 'HIGH'").fetchone()[0]
-##    return render_template(
-##        "analysis/overview.html",
-##        total_predictions=total_predictions,
-##        high_risk=high_risk,
     conn, db_type = get_db()
-    cursor = conn.cursor()
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS total FROM predictions")
+        total_predictions = cur.fetchone()["total"]
 
-    cursor.execute("SELECT COUNT(*) FROM predictions")
-    total_predictions = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM predictions WHERE risk_level = 'HIGH'")
-    high_risk = cursor.fetchone()[0]
-    
-    cursor.close()
+        cur.execute("SELECT COUNT(*) AS high FROM predictions WHERE risk_level = 'HIGH'")
+        high_risk = cur.fetchone()["high"]
     conn.close()
-    
     return render_template(
         "analysis/overview.html",
         total_predictions=total_predictions,
@@ -203,7 +166,7 @@ def analysis_predictions():
                     form_data["contract_type"], form_data["internet_service"], form_data["tech_support"],
                     prediction["prediction"], prediction["probability"], prediction["risk_level"],
                 ))
-                prediction_id = cursor.fetchone()[0]
+                prediction_id = cursor.fetchone()["id"]
             else:
                 cursor.execute("""
                     INSERT INTO predictions (
