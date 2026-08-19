@@ -7,10 +7,8 @@ from sklearn.neighbors import KNeighborsClassifier
 import joblib
 
 RANDOM_STATE = 42
-MODEL_CACHE = "model_cache.joblib"
+MODEL_CACHE = Path(__file__).resolve().parent / "model_cache.joblib"
 
-# on train: joblib.dump({"model": self.model, "scaler": self.scaler, "feature_columns": self.feature_columns}, MODEL_CACHE)
-# on init: if MODEL_CACHE.exists(): load instead of retrain
 MODEL_PARAMS = {
     "metric": "manhattan",
     "n_neighbors": 11,
@@ -76,12 +74,36 @@ class ChurnModelService:
             encoded = encoded.drop(columns=["CustomerID"])
         return encoded
 
+    def _data_fingerprint(self) -> tuple:
+        # Cheap way to detect "the CSV changed" without hashing file contents:
+        # size + mtime is enough to invalidate the cache when the dataset
+        # is replaced, while still being fast to check on every worker boot.
+        stat = self.data_path.stat()
+        return (stat.st_size, stat.st_mtime)
+
     def _load_and_train(self):
         try:
             if not self.data_path.exists():
                 raise FileNotFoundError(
                     f"{self.data_path.name} was not found. Place it beside app.py."
                 )
+
+            fingerprint = self._data_fingerprint()
+            if MODEL_CACHE.exists():
+                try:
+                    cached = joblib.load(MODEL_CACHE)
+                    if cached.get("fingerprint") == fingerprint and cached.get("params") == MODEL_PARAMS:
+                        self.model = cached["model"]
+                        self.scaler = cached["scaler"]
+                        self.feature_columns = cached["feature_columns"]
+                        self.train_rows = cached["train_rows"]
+                        self.test_rows = cached["test_rows"]
+                        self.ready = True
+                        self.error = None
+                        return
+                except Exception:
+                    # Corrupt or incompatible cache file — fall through and retrain.
+                    pass
 
             df = pd.read_csv(self.data_path)
             model_df = self._clean_dataframe(df)
@@ -111,6 +133,21 @@ class ChurnModelService:
             self.test_rows = len(test_df)
             self.ready = True
             self.error = None
+
+            try:
+                joblib.dump({
+                    "model": self.model,
+                    "scaler": self.scaler,
+                    "feature_columns": self.feature_columns,
+                    "train_rows": self.train_rows,
+                    "test_rows": self.test_rows,
+                    "fingerprint": fingerprint,
+                    "params": MODEL_PARAMS,
+                }, MODEL_CACHE)
+            except Exception:
+                # Caching is a nice-to-have; never let a failed write to
+                # disk (e.g. read-only filesystem) break the app.
+                pass
         except Exception as exc:
             self.ready = False
             self.error = str(exc)
