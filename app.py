@@ -306,9 +306,7 @@ def reset_prediction():
 def clear_prediction_history():
     # Destructive action — require a shared admin token so an anonymous
     # visitor can't wipe the prediction history for everyone.
-##    if not ADMIN_TOKEN or request.form.get("admin_token") != ADMIN_TOKEN:
-##    print(repr(ADMIN_TOKEN), repr(request.form.get("admin_token")))
-    if not ADMIN_TOKEN or not secrets.compare_digest(request.form.get("admin_token", ""), ADMIN_TOKEN):
+    if not ADMIN_TOKEN or not secrets.compare_digest(request.form.get("admin_token",""), ADMIN_TOKEN):
         flash("Not authorized to clear prediction history.", "error")
         return redirect(url_for("analysis_predictions"))
 

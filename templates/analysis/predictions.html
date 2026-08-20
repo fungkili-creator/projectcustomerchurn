@@ -317,7 +317,7 @@
 <form method="POST" action="{{ url_for('clear_prediction_history') }}"
       onsubmit="return confirm('Delete all prediction records?') && injectAdminToken(this);">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-    <input type="hidden" name="admin_token" id="admin-token-field" value=""/>
+    <input type="hidden" name="admin_token" id="admin-token-field" value="w7Jzgj4_dXYhTJr1QS8H3CZ-KAIOBw5p88IS_yujyB0"/>
     <button type="submit" class="w-full py-3 border-2 border-error/30 text-error rounded-lg font-bold hover:bg-error-container">Clear Database History</button>
 </form>
 
@@ -418,47 +418,59 @@ if (predictionForm) {
 </div>
 </footer>
 <script>
-        // Micro-interaction for inputs
-        const inputs = document.querySelectorAll('input, select');
-        inputs.forEach(input => {
-            input.addEventListener('focus', () => {
-                input.parentElement.classList.add('scale-[1.01]');
-            });
-            input.addEventListener('blur', () => {
-                input.parentElement.classList.remove('scale-[1.01]');
-            });
+    // Micro-interaction for inputs
+    const inputs = document.querySelectorAll('input, select');
+    inputs.forEach(input => {
+        input.addEventListener('focus', () => {
+            input.parentElement.classList.add('scale-[1.01]');
         });
+        input.addEventListener('blur', () => {
+            input.parentElement.classList.remove('scale-[1.01]');
+        });
+    });
 
-        // Floating connectivity background effect
-        const createNode = () => {
-            const node = document.createElement('div');
-            node.className = 'fixed rounded-full pointer-events-none opacity-20 bg-primary-container mix-blend-multiply transition-all duration-[10000ms]';
-            const size = Math.random() * 200 + 50;
-            node.style.width = `${size}px`;
-            node.style.height = `${size}px`;
+    // Floating connectivity background effect
+    const createNode = () => {
+        const node = document.createElement('div');
+        node.className = 'fixed rounded-full pointer-events-none opacity-20 bg-primary-container mix-blend-multiply transition-all duration-[10000ms]';
+        const size = Math.random() * 200 + 50;
+        node.style.width = `${size}px`;
+        node.style.height = `${size}px`;
+        node.style.left = `${Math.random() * 100}vw`;
+        node.style.top = `${Math.random() * 100}vh`;
+        node.style.filter = 'blur(60px)';
+        document.body.appendChild(node);
+        
+        setTimeout(() => {
             node.style.left = `${Math.random() * 100}vw`;
             node.style.top = `${Math.random() * 100}vh`;
-            node.style.filter = 'blur(60px)';
-            document.body.appendChild(node);
-            
-            setTimeout(() => {
-                node.style.left = `${Math.random() * 100}vw`;
-                node.style.top = `${Math.random() * 100}vh`;
-            }, 100);
+        }, 100);
 
-            setTimeout(() => {
-                node.remove();
-            }, 15000);
-        };
+        setTimeout(() => {
+            node.remove();
+        }, 15000);
+    };
 
-        function injectAdminToken(form) {
-            const token = prompt("Enter admin token to confirm deletion:");
-            if (!token) return false;
-            document.getElementById("admin-token-field").value = token;
-            return true;
-        };
-
-        setInterval(createNode, 3000);
+    function injectAdminToken(form) {
+        const token = prompt("Enter admin token to confirm deletion:");
+        if (token == null) {
+        // user clicked Cancel
+        return false;
+        }   
+    
+        if (token.trim() == "") {
+        // user clicked OK but left it blank
+        alert("Admin token cannot be empty.");
+        return false;
+        }
+    
+        if (!token) return false;
+        
+        document.getElementById("admin-token-field").value= token;
+        return true;
+    };
+        
+    setInterval(createNode, 3000);
     </script>
 <div class="fixed rounded-full pointer-events-none opacity-20 bg-primary-container mix-blend-multiply transition-all duration-[10000ms]" style="width: 220.009px; height: 220.009px; left: 82.4074vw; top: 97.0134vh; filter: blur(60px);"></div><div class="fixed rounded-full pointer-events-none opacity-20 bg-primary-container mix-blend-multiply transition-all duration-[10000ms]" style="width: 186.056px; height: 186.056px; left: 61.0853vw; top: 26.9717vh; filter: blur(60px);"></div><div class="fixed rounded-full pointer-events-none opacity-20 bg-primary-container mix-blend-multiply transition-all duration-[10000ms]" style="width: 94.1001px; height: 94.1001px; left: 43.9718vw; top: 62.6334vh; filter: blur(60px);"></div><div class="fixed rounded-full pointer-events-none opacity-20 bg-primary-container mix-blend-multiply transition-all duration-[10000ms]" style="width: 246.981px; height: 246.981px; left: 81.6703vw; top: 75.0603vh; filter: blur(60px);"></div><div class="fixed rounded-full pointer-events-none opacity-20 bg-primary-container mix-blend-multiply transition-all duration-[10000ms]" style="width: 172.159px; height: 172.159px; left: 17.0045vw; top: 81.8162vh; filter: blur(60px);"></div>
 <div class="fixed rounded-full pointer-events-none opacity-20 bg-primary-container mix-blend-multiply transition-all duration-[10000ms]" style="width: 185.886px; height: 185.886px; left: 31.2144vw; top: 51.9247vh; filter: blur(60px);"></div><div class="fixed rounded-full pointer-events-none opacity-20 bg-primary-container mix-blend-multiply transition-all duration-[10000ms]" style="width: 114.7px; height: 114.7px; left: 10.2353vw; top: 67.6648vh; filter: blur(60px);"></div><div class="fixed rounded-full pointer-events-none opacity-20 bg-primary-container mix-blend-multiply transition-all duration-[10000ms]" style="width: 203.894px; height: 203.894px; left: 5.53225vw; top: 0.943788vh; filter: blur(60px);"></div><div class="fixed rounded-full pointer-events-none opacity-20 bg-primary-container mix-blend-multiply transition-all duration-[10000ms]" style="width: 121.373px; height: 121.373px; left: 34.3118vw; top: 36.6376vh; filter: blur(60px);"></div><div class="fixed rounded-full pointer-events-none opacity-20 bg-primary-container mix-blend-multiply transition-all duration-[10000ms]" style="width: 50.1426px; height: 50.1426px; left: 25.3432vw; top: 89.5071vh; filter: blur(60px);"></div>
