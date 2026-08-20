@@ -355,5 +355,5 @@ if __name__ == "__main__":
     # init_db() already ran at import time above. Debug mode is opt-in via
     # env var so it can never be accidentally left on in a deployed build.
     debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=5000, debug=debug_mode)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=10000, debug=debug_mode)
