@@ -62,6 +62,11 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn, "sqlite"
 
+def release_db(conn, db_type):
+    if db_type == "postgres":
+        pg_pool.putconn(conn)
+    else:
+        conn.close()
 
 def init_db():
     conn, db_type = get_db()
@@ -110,11 +115,7 @@ def init_db():
     finally:
         release_db(conn, db_type)
 
-def release_db(conn, db_type):
-    if db_type == "postgres":
-        pg_pool.putconn(conn)
-    else:
-        conn.close()
+
 
 # Run once at import time, not inside `if __name__ == "__main__"`: gunicorn
 # (see Procfile) imports this module directly and never executes that
@@ -187,15 +188,17 @@ def analysis_overview():
     conn, db_type = get_db()
     # change from simle to thtead by Ki 8/20/2026 Point 2
     try: 
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS total FROM predictions")
-            total_predictions = cur.fetchone()["total"]
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) AS total FROM predictions")
+        total_predictions = cur.fetchone()["total"]
 
-            cur.execute("SELECT COUNT(*) AS high FROM predictions WHERE risk_level = 'HIGH'")
-            high_risk = cur.fetchone()["high"]
-        conn.close()
+        cur.execute("SELECT COUNT(*) AS high FROM predictions WHERE risk_level = 'HIGH'")
+        high_risk = cur.fetchone()["high"]
+
+        cur.close()
     finally:
         release_db(conn, db_type)
+
     return render_template(
         "analysis/overview.html",
         total_predictions=total_predictions,
@@ -250,7 +253,6 @@ def analysis_predictions():
 
                 conn.commit() # may review on the position from Ki
                 cursor.close()
-                conn.close()
             finally: 
                 release_db(conn,db_type)
             return redirect(url_for("analysis_predictions", result_id=prediction_id))
@@ -269,21 +271,23 @@ def analysis_predictions():
         conn, db_type = get_db()
         # change from simle to thtead by Ki 8/20/2026 Point 2
         try:
+            
             if db_type == "postgres":
                 cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 cursor.execute("SELECT * FROM predictions WHERE id = %s", (result_id,))
-                row = cursor.fetchone()
-                if row:
-                    row = dict(row)
+        #        row = cursor.fetchone()
+        #        if row:
+        #            row = dict(row)
             else:
                 cursor = conn.cursor()
                 cursor.execute("SELECT * FROM predictions WHERE id = ?", (result_id,))
-                row = cursor.fetchone()
-                if row:
-                    row = dict(row)
+            # change due to a bit duplicated
+            row = cursor.fetchone()
+            if row:
+                row = dict(row)
 
                 cursor.close()
-            conn.close()
+        
         finally:
             release_db(conn, db_type)
 
@@ -332,7 +336,6 @@ def clear_prediction_history():
         cursor.execute("DELETE FROM predictions")
         conn.commit()
         cursor.close()
-        conn.close()
     finally:
         release_db(conn, db_type)
     flash("Prediction history was cleared.", "success")
