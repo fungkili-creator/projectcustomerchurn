@@ -366,13 +366,19 @@ def clear_prediction_history():
 
     conn, db_type = get_db()
     # change from simle to thtead by Ki 8/20/2026 Point 2
+    discard_conn = False
     try: 
         cursor = conn.cursor()
         cursor.execute("DELETE FROM predictions")
         conn.commit()
         cursor.close()
+    except psycopg2.OperationalError:
+        discard_conn = True
+        app.logger.exception("Database connection error while clearing history")
+        flash("Connection hiccup — please try again.", "error")
+        return redirect(url_for("analysis_predictions"))
     finally:
-        release_db(conn, db_type)
+        release_db(conn, db_type, discard=discard_conn)
     flash("Prediction history was cleared.", "success")
     return redirect(url_for("analysis_predictions"))
 
