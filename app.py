@@ -2,12 +2,14 @@ from pathlib import Path
 import sqlite3
 import psycopg2
 import psycopg2.extras
+from psycopg2 import pool
 from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_wtf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from model_service import ChurnModelService
 import os
+import secrets
 from dotenv import load_dotenv 
 
 load_dotenv()
@@ -15,6 +17,9 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "customer_churn_data.csv"
 DATABASE_URL = os.environ.get("DATABASE_URL")
+pg_pool = None
+if DATABASE_URL:
+    pg_pool = pool.SimpleConnectionPool(1, 10, DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
 
 app = Flask(__name__)
@@ -31,6 +36,15 @@ except KeyError as exc:
     ) from exc
 
 csrf = CSRFProtect(app)
+@app.after_request
+def set_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per hour"])
 
 model_service = ChurnModelService(DATA_PATH)
@@ -41,7 +55,7 @@ def get_db():
     # local SQLite file when it isn't set, so `python app.py` still works
     # without a Postgres instance on hand (matches README's local dev flow).
     if DATABASE_URL:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+        conn = pg_pool.getconn()
         return conn, "postgres"
     conn = sqlite3.connect(BASE_DIR / "database.db")
     conn.row_factory = sqlite3.Row
@@ -102,6 +116,12 @@ try:
 except Exception:
     app.logger.exception("Failed to initialize the predictions table at startup")
 
+
+def release_db(conn, db_type):
+    if db_type == "postgres":
+        pg_pool.putconn(conn)
+    else:
+        conn.close()
 
 def validate_form(form):
     values = {
@@ -286,7 +306,9 @@ def reset_prediction():
 def clear_prediction_history():
     # Destructive action — require a shared admin token so an anonymous
     # visitor can't wipe the prediction history for everyone.
-    if not ADMIN_TOKEN or request.form.get("admin_token") != ADMIN_TOKEN:
+##    if not ADMIN_TOKEN or request.form.get("admin_token") != ADMIN_TOKEN:
+    print(repr(ADMIN_TOKEN), repr(request.form.get("admin_token")))
+    if not ADMIN_TOKEN or not secrets.compare_digest(request.form.get("admin_token", ""), ADMIN_TOKEN):
         flash("Not authorized to clear prediction history.", "error")
         return redirect(url_for("analysis_predictions"))
 
