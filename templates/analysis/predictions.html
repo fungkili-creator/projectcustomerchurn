@@ -317,7 +317,7 @@
 <form method="POST" action="{{ url_for('clear_prediction_history') }}"
       onsubmit="return confirm('Delete all prediction records?') && injectAdminToken(this);">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-    <input type="hidden" name="admin_token" id="admin-token-field" value="w7Jzgj4_dXYhTJr1QS8H3CZ-KAIOBw5p88IS_yujyB0"/>
+    <input type="hidden" name="admin_token" id="admin-token-field" value=""/>
     <button type="submit" class="w-full py-3 border-2 border-error/30 text-error rounded-lg font-bold hover:bg-error-container">Clear Database History</button>
 </form>
 
