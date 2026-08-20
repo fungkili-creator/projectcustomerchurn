@@ -11,7 +11,7 @@ from model_service import ChurnModelService
 import os
 import secrets
 from dotenv import load_dotenv 
-
+## remarks this app.py better to run in python 3.12, make sure the workspace environment
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -20,7 +20,14 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 pg_pool = None
 if DATABASE_URL:
     # change from simle to thtead by Ki 8/20/2026 Point 1
-    pg_pool = pool.ThreadedConnectionPool(1, 10, DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    # amendment due to real environment handling
+    pg_pool = pool.ThreadedConnectionPool(
+        1, 10, DATABASE_URL, 
+        cursor_factory=psycopg2.extras.RealDictCursor,
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,)
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
 
 app = Flask(__name__)
@@ -65,8 +72,13 @@ def get_db():
 def release_db(conn, db_type):
     if db_type == "postgres":
         if conn.closed == 0:
-            conn.rollback()  # clears any aborted/uncommitted transaction state
-        pg_pool.putconn(conn)
+            try:    
+                conn.rollback()  # clears any aborted/uncommitted transaction state
+                pg_pool.putconn(conn)
+            except Exception:
+                pg_pool.putconn(conn, close=True)  # force-discard if it's actually dead
+        else:
+            pg_pool.putconn(conn, close=True)    
     else:
         conn.close()
 
@@ -268,6 +280,12 @@ def analysis_predictions():
         except ValueError as exc:
             # Validation errors are safe and useful to show the user directly.
             flash(str(exc), "error")
+        except psycopg2.OperationalError:
+            # Stale/dropped DB connection (e.g. SSL EOF). release_db() below
+            # already discards this connection instead of pooling it, so a
+            # retry from the user should get a fresh, working connection.
+            app.logger.exception("Database connection error while generating a prediction")
+            flash("Connection hiccup — please try submitting again.", "error")
         except Exception:
             # Anything unexpected (DB errors, model errors, etc.) is logged
             # server-side only, so internals are never exposed to the client.
