@@ -19,7 +19,8 @@ DATA_PATH = BASE_DIR / "customer_churn_data.csv"
 DATABASE_URL = os.environ.get("DATABASE_URL")
 pg_pool = None
 if DATABASE_URL:
-    pg_pool = pool.SimpleConnectionPool(1, 10, DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    # change from simle to thtead by Ki 8/20/2026 Point 1
+    pg_pool = pool.ThreadedConnectionPool(1, 10, DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
 
 app = Flask(__name__)
@@ -64,12 +65,33 @@ def get_db():
 
 def init_db():
     conn, db_type = get_db()
-    if db_type == "postgres":
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
+# change from simle to thtead by Ki 8/20/2026 Point 2
+    try: 
+        if db_type == "postgres":
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS predictions (
+                            id SERIAL PRIMARY KEY,
+                            age INTEGER NOT NULL,
+                            gender TEXT NOT NULL,
+                            tenure INTEGER NOT NULL,
+                            monthly_charges REAL NOT NULL,
+                            total_charges REAL NOT NULL,
+                            contract_type TEXT NOT NULL,
+                            internet_service TEXT NOT NULL,
+                            tech_support TEXT NOT NULL,
+                            prediction TEXT NOT NULL,
+                            churn_probability REAL NOT NULL,
+                            risk_level TEXT NOT NULL,
+                            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+        else:
+            with conn:
+                conn.execute("""
                     CREATE TABLE IF NOT EXISTS predictions (
-                        id SERIAL PRIMARY KEY,
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
                         age INTEGER NOT NULL,
                         gender TEXT NOT NULL,
                         tenure INTEGER NOT NULL,
@@ -84,27 +106,15 @@ def init_db():
                         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
-    else:
-        with conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS predictions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    age INTEGER NOT NULL,
-                    gender TEXT NOT NULL,
-                    tenure INTEGER NOT NULL,
-                    monthly_charges REAL NOT NULL,
-                    total_charges REAL NOT NULL,
-                    contract_type TEXT NOT NULL,
-                    internet_service TEXT NOT NULL,
-                    tech_support TEXT NOT NULL,
-                    prediction TEXT NOT NULL,
-                    churn_probability REAL NOT NULL,
-                    risk_level TEXT NOT NULL,
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-    conn.close()
+        conn.close()
+    finally:
+        release_db(conn, db_type)
 
+def release_db(conn, db_type):
+    if db_type == "postgres":
+        pg_pool.putconn(conn)
+    else:
+        conn.close()
 
 # Run once at import time, not inside `if __name__ == "__main__"`: gunicorn
 # (see Procfile) imports this module directly and never executes that
@@ -115,13 +125,6 @@ try:
     init_db()
 except Exception:
     app.logger.exception("Failed to initialize the predictions table at startup")
-
-
-def release_db(conn, db_type):
-    if db_type == "postgres":
-        pg_pool.putconn(conn)
-    else:
-        conn.close()
 
 def validate_form(form):
     values = {
@@ -180,14 +183,19 @@ def analysis():
 @app.route("/analysis/overview")
 ## change code by using postgres
 def analysis_overview():
-    conn, db_type = get_db()
-    with conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*) AS total FROM predictions")
-        total_predictions = cur.fetchone()["total"]
 
-        cur.execute("SELECT COUNT(*) AS high FROM predictions WHERE risk_level = 'HIGH'")
-        high_risk = cur.fetchone()["high"]
-    conn.close()
+    conn, db_type = get_db()
+    # change from simle to thtead by Ki 8/20/2026 Point 2
+    try: 
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS total FROM predictions")
+            total_predictions = cur.fetchone()["total"]
+
+            cur.execute("SELECT COUNT(*) AS high FROM predictions WHERE risk_level = 'HIGH'")
+            high_risk = cur.fetchone()["high"]
+        conn.close()
+    finally:
+        release_db(conn, db_type)
     return render_template(
         "analysis/overview.html",
         total_predictions=total_predictions,
@@ -200,6 +208,7 @@ def analysis_overview():
 def analysis_predictions():
     result = None
     form_data = {}
+# change from simle to thtead by Ki 8/20/2026 Point 2 @second try
 
     if request.method == "POST":
         try:
@@ -207,42 +216,43 @@ def analysis_predictions():
             prediction = model_service.predict(form_data)
 
             conn, db_type = get_db()
-            cursor = conn.cursor()
-            
-            if db_type == "postgres":
-                cursor.execute("""
-                    INSERT INTO predictions (
-                        age, gender, tenure, monthly_charges, total_charges,
-                        contract_type, internet_service, tech_support,
-                        prediction, churn_probability, risk_level
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id;
-                """, (
-                    int(form_data["age"]), form_data["gender"], int(form_data["tenure"]),
-                    float(form_data["monthly_charges"]), float(form_data["total_charges"]),
-                    form_data["contract_type"], form_data["internet_service"], form_data["tech_support"],
-                    prediction["prediction"], prediction["probability"], prediction["risk_level"],
-                ))
-                prediction_id = cursor.fetchone()["id"]
-            else:
-                cursor.execute("""
-                    INSERT INTO predictions (
-                        age, gender, tenure, monthly_charges, total_charges,
-                        contract_type, internet_service, tech_support,
-                        prediction, churn_probability, risk_level
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    int(form_data["age"]), form_data["gender"], int(form_data["tenure"]),
-                    float(form_data["monthly_charges"]), float(form_data["total_charges"]),
-                    form_data["contract_type"], form_data["internet_service"], form_data["tech_support"],
-                    prediction["prediction"], prediction["probability"], prediction["risk_level"],
-                ))
-                prediction_id = cursor.lastrowid
+            try: 
+                cursor = conn.cursor()
+                if db_type == "postgres":
+                    cursor.execute("""
+                        INSERT INTO predictions (
+                            age, gender, tenure, monthly_charges, total_charges,
+                            contract_type, internet_service, tech_support,
+                            prediction, churn_probability, risk_level
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id;
+                    """, (
+                        int(form_data["age"]), form_data["gender"], int(form_data["tenure"]),
+                        float(form_data["monthly_charges"]), float(form_data["total_charges"]),
+                        form_data["contract_type"], form_data["internet_service"], form_data["tech_support"],
+                        prediction["prediction"], prediction["probability"], prediction["risk_level"],
+                    ))
+                    prediction_id = cursor.fetchone()["id"]
+                else:
+                    cursor.execute("""
+                        INSERT INTO predictions (
+                            age, gender, tenure, monthly_charges, total_charges,
+                            contract_type, internet_service, tech_support,
+                            prediction, churn_probability, risk_level
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        int(form_data["age"]), form_data["gender"], int(form_data["tenure"]),
+                        float(form_data["monthly_charges"]), float(form_data["total_charges"]),
+                        form_data["contract_type"], form_data["internet_service"], form_data["tech_support"],
+                        prediction["prediction"], prediction["probability"], prediction["risk_level"],
+                    ))
+                    prediction_id = cursor.lastrowid
 
-            conn.commit()
-            cursor.close()
-            conn.close()
-
+                conn.commit() # may review on the position from Ki
+                cursor.close()
+                conn.close()
+            finally: 
+                release_db(conn,db_type)
             return redirect(url_for("analysis_predictions", result_id=prediction_id))
         except ValueError as exc:
             # Validation errors are safe and useful to show the user directly.
@@ -252,25 +262,30 @@ def analysis_predictions():
             # server-side only, so internals are never exposed to the client.
             app.logger.exception("Unexpected error while generating a prediction")
             flash("Something went wrong processing your request. Please try again.", "error")
+            
 
     result_id = request.args.get("result_id", type=int)
     if result_id:
         conn, db_type = get_db()
-        if db_type == "postgres":
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cursor.execute("SELECT * FROM predictions WHERE id = %s", (result_id,))
-            row = cursor.fetchone()
-            if row:
-                row = dict(row)
-        else:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM predictions WHERE id = ?", (result_id,))
-            row = cursor.fetchone()
-            if row:
-                row = dict(row)
+        # change from simle to thtead by Ki 8/20/2026 Point 2
+        try:
+            if db_type == "postgres":
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute("SELECT * FROM predictions WHERE id = %s", (result_id,))
+                row = cursor.fetchone()
+                if row:
+                    row = dict(row)
+            else:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM predictions WHERE id = ?", (result_id,))
+                row = cursor.fetchone()
+                if row:
+                    row = dict(row)
 
-        cursor.close()
-        conn.close()
+                cursor.close()
+            conn.close()
+        finally:
+            release_db(conn, db_type)
 
         if row:
             row["confidence_percent"] = round(float(row["churn_probability"]) * 100, 1)
@@ -311,12 +326,15 @@ def clear_prediction_history():
         return redirect(url_for("analysis_predictions"))
 
     conn, db_type = get_db()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM predictions")
-    conn.commit()
-    cursor.close()
-    conn.close()
-
+    # change from simle to thtead by Ki 8/20/2026 Point 2
+    try: 
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM predictions")
+        conn.commit()
+        cursor.close()
+        conn.close()
+    finally:
+        release_db(conn, db_type)
     flash("Prediction history was cleared.", "success")
     return redirect(url_for("analysis_predictions"))
 
