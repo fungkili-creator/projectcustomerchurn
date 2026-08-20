@@ -111,7 +111,6 @@ def init_db():
                         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
-        conn.close()
     finally:
         release_db(conn, db_type)
 
