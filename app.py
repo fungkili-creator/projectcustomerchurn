@@ -69,16 +69,19 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn, "sqlite"
 
-def release_db(conn, db_type):
+def release_db(conn, db_type, discard=False):
     if db_type == "postgres":
-        if conn.closed == 0:
-            try:    
-                conn.rollback()  # clears any aborted/uncommitted transaction state
+        if discard:
+            try:
+                pg_pool.putconn(conn, close=True)
+            except Exception:
+                pass
+        else:
+            try:
+                conn.rollback()
                 pg_pool.putconn(conn)
             except Exception:
-                pg_pool.putconn(conn, close=True)  # force-discard if it's actually dead
-        else:
-            pg_pool.putconn(conn, close=True)    
+                pg_pool.putconn(conn, close=True)
     else:
         conn.close()
 
@@ -240,6 +243,7 @@ def analysis_predictions():
             prediction = model_service.predict(form_data)
 
             conn, db_type = get_db()
+            discard_conn = False
             try: 
                 cursor = conn.cursor()
                 if db_type == "postgres":
@@ -274,8 +278,12 @@ def analysis_predictions():
 
                 conn.commit() # may review on the position from Ki
                 cursor.close()
-            finally: 
-                release_db(conn,db_type)
+            except psycopg2.OperationalError:
+                discard_conn = True
+                raise
+            finally:
+                release_db(conn, db_type, discard=discard_conn)
+               
             return redirect(url_for("analysis_predictions", result_id=prediction_id))
         except ValueError as exc:
             # Validation errors are safe and useful to show the user directly.
