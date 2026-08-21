@@ -375,6 +375,7 @@ def clear_prediction_history():
         cursor.execute("DELETE FROM predictions")
         conn.commit()
         cursor.close()
+        flash("Prediction history was cleared.", "success")
     except psycopg2.OperationalError:
         discard_conn = True
         app.logger.exception("Database connection error while clearing history")
