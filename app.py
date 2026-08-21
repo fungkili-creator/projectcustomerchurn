@@ -383,7 +383,7 @@ def clear_prediction_history():
         return redirect(url_for("analysis_predictions"))
     finally:
         release_db(conn, db_type, discard=discard_conn)
-    flash("Prediction history was cleared.", "success")
+#    flash("Prediction history was cleared.", "success")
     return redirect(url_for("analysis_predictions"))
 
 
