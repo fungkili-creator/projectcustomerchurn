@@ -64,6 +64,19 @@ def get_db():
     # without a Postgres instance on hand (matches README's local dev flow).
     if DATABASE_URL:
         conn = pg_pool.getconn()
+        try:
+            # Cheap liveness check — if the connection is stale/corrupted,
+            # this will throw immediately instead of failing later on the
+            # real query.
+            with conn.cursor() as test_cur:
+                test_cur.execute("SELECT 1")
+        except psycopg2.OperationalError:
+            # Connection is dead. Discard it and get a fresh one.
+            try:
+                pg_pool.putconn(conn, close=True)
+            except Exception:
+                pass
+            conn = pg_pool.getconn()
         return conn, "postgres"
     conn = sqlite3.connect(BASE_DIR / "database.db")
     conn.row_factory = sqlite3.Row
