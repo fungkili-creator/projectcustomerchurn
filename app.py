@@ -208,20 +208,23 @@ def analysis():
 @app.route("/analysis/overview")
 ## change code by using postgres
 def analysis_overview():
-
     conn, db_type = get_db()
-    # change from simle to thtead by Ki 8/20/2026 Point 2
-    try: 
+    discard_conn = False
+    try:
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) AS total FROM predictions")
         total_predictions = cur.fetchone()["total"]
-
         cur.execute("SELECT COUNT(*) AS high FROM predictions WHERE risk_level = 'HIGH'")
         high_risk = cur.fetchone()["high"]
-
         cur.close()
+    except psycopg2.OperationalError:
+        discard_conn = True
+        app.logger.exception("Database connection error loading overview")
+        flash("Connection hiccup — please refresh the page.", "error")
+        total_predictions = None
+        high_risk = None
     finally:
-        release_db(conn, db_type)
+        release_db(conn, db_type, discard=discard_conn)
 
     return render_template(
         "analysis/overview.html",
