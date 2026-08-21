@@ -143,14 +143,14 @@ try:
     init_db()
 except Exception:
     app.logger.exception("Failed to initialize the predictions table at startup")
-
+## remarks: code for the future expandsion use 
 def post_fork(server, worker):
     global pg_pool
     import app
     if app.pg_pool:
         app.pg_pool.closeall()
     app.pg_pool = app.pool.ThreadedConnectionPool(1, 10, app.DATABASE_URL, cursor_factory=app.psycopg2.extras.RealDictCursor)
-
+## 
 def validate_form(form):
     values = {
         "age": form.get("age", "").strip(),
